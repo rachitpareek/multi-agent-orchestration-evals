@@ -1,0 +1,124 @@
+# MAO-Bench Task: adv_001
+# Tier: adversarial — tests robustness under failure
+# One of the three assigned agents is killed at the 40% mark.
+
+id: adv_001
+version: "0.1.0"
+tier: adversarial
+title: "Implement user authentication module with agent failure injection"
+difficulty: hard
+
+prompt: |
+  The repository needs a user authentication module implementing JWT-based
+  authentication. Three agents are available to work in parallel on:
+
+  Agent A: Core auth logic (token generation, validation, refresh)
+  Agent B: API endpoints (/login, /logout, /refresh, /me)
+  Agent C: Tests and documentation
+
+  The orchestration system must:
+  1. Detect when Agent C fails at approximately the 40% mark
+  2. Redistribute the test-writing work to Agent A or B
+  3. Complete the full feature including tests and documentation
+  4. Produce a merged, conflict-free implementation
+
+  The final implementation must pass all tests regardless of which agent
+  ultimately wrote them.
+
+context:
+  repo: "maobench/auth-service"
+  base_commit: "abc9999"
+  background: |
+    The repository is an existing FastAPI service with user and session models.
+    Use PyJWT for token handling. Tests should use pytest with the existing
+    conftest.py fixtures. Documentation should update the existing API.md.
+
+agent_config:
+  min_agents: 2      # minimum after failure
+  max_agents: 3      # starts with 3
+  recommended_agents: 3
+  roles:
+    - role: auth_implementer
+      count: 1
+      description: "Implements core JWT auth logic"
+    - role: api_implementer
+      count: 1
+      description: "Implements HTTP endpoints"
+    - role: test_writer
+      count: 1
+      description: "Writes tests and documentation (this agent is killed)"
+  topology: star
+  max_sessions: 2
+
+token_budget:
+  input_budget: 80000
+  output_budget: 30000
+  coordination_budget: 10000
+
+environment:
+  docker_image: "ghcr.io/rachitpareek/maobench-sandbox-python:3.12"
+  setup_commands:
+    - "pip install -e .[dev] pyjwt fastapi httpx pytest -q"
+  network_policy: isolated
+  failure_injections:
+    - type: kill_agent
+      target: test_writer
+      trigger:
+        task_progress_fraction: 0.40  # kill after ~40% of expected task time
+      severity: hard  # agent cannot be restarted
+
+oracle:
+  partial_credit: true
+  claims:
+    - id: "adv_001_c1"
+      claim: "JWT token generation and validation functions exist and are correct"
+      weight: 0.20
+      automated: true
+      test_command: "pytest tests/test_auth_core.py -q"
+
+    - id: "adv_001_c2"
+      claim: "All four auth endpoints exist and return correct HTTP status codes"
+      weight: 0.20
+      automated: true
+      test_command: "pytest tests/test_auth_api.py -q"
+
+    - id: "adv_001_c3"
+      claim: "Test suite has at least 15 tests covering the authentication module"
+      weight: 0.20
+      automated: true
+      test_command: "pytest tests/ --collect-only -q | grep 'test_auth' | wc -l | awk '{exit ($1 < 15)}'"
+
+    - id: "adv_001_c4"
+      claim: "API.md is updated with authentication endpoint documentation"
+      weight: 0.10
+      automated: true
+      test_command: "grep -q '/login\\|/logout\\|/refresh\\|/me' API.md"
+
+    - id: "adv_001_c5"
+      claim: "All tests pass (the system recovered from the agent failure)"
+      weight: 0.20
+      automated: true
+      test_command: "pytest tests/ -q --tb=short"
+
+    - id: "adv_001_c6"
+      claim: "The orchestration system detected the agent failure and reassigned the work"
+      weight: 0.10
+      automated: false
+      # Scored by examining orchestration logs for failure detection + reassignment event
+
+  test_suite:
+    command: "pytest tests/ -q"
+    pass_threshold: 0.9
+    timeout_seconds: 120
+
+metadata:
+  created_at: "2026-03-08"
+  annotators: ["rachitpareek"]
+  source: "synthetic"
+  programming_language: "python"
+  domain: "backend"
+  tags: ["authentication", "jwt", "adversarial", "agent-failure", "recovery", "fastapi"]
+  contamination_check:
+    checked_at: "2026-03-08"
+    method: "synthetic — no contamination risk"
+    result: "clean"

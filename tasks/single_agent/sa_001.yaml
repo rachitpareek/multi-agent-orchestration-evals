@@ -1,0 +1,93 @@
+# MAO-Bench Task: sa_001
+# Tier: single_agent (floor baseline)
+# A representative single-agent task: fix a real-world Python bug.
+
+id: sa_001
+version: "0.1.0"
+tier: single_agent
+title: "Fix off-by-one error in pagination helper"
+difficulty: easy
+
+prompt: |
+  The repository contains a Python web application with a pagination utility module.
+  A bug has been reported: when fetching the last page of results, the page contains
+  duplicate items from the previous page.
+
+  Investigate the pagination logic, identify the root cause of the duplicate-items bug,
+  fix it, and ensure the fix is covered by tests.
+
+  Do not break any existing tests. The fix should be minimal and targeted — do not
+  refactor unrelated code.
+
+context:
+  repo: "maobench/example-webapp"
+  base_commit: "abc1234"
+  relevant_files:
+    - "app/utils/pagination.py"
+    - "tests/test_pagination.py"
+  background: |
+    The pagination helper computes page offsets for database queries.
+    It is used by the `/api/items` endpoint and the `/api/search` endpoint.
+    The bug only manifests when the total item count is exactly divisible
+    by the page size.
+
+agent_config:
+  min_agents: 1
+  max_agents: 1
+  recommended_agents: 1
+  max_sessions: 1
+
+token_budget:
+  input_budget: 15000
+  output_budget: 5000
+  coordination_budget: 0
+
+environment:
+  docker_image: "ghcr.io/rachitpareek/maobench-sandbox-python:3.12"
+  setup_commands:
+    - "pip install -e .[dev] -q"
+  network_policy: isolated
+
+oracle:
+  partial_credit: true
+  claims:
+    - id: "sa_001_c1"
+      claim: "The pagination bug is fixed and items are not duplicated on the last page when total % page_size == 0"
+      weight: 0.50
+      automated: true
+      test_command: "pytest tests/test_pagination.py::test_last_page_no_duplicates -x -q"
+
+    - id: "sa_001_c2"
+      claim: "All previously-passing tests still pass after the fix"
+      weight: 0.30
+      automated: true
+      test_command: "pytest tests/test_pagination.py -q --tb=no"
+
+    - id: "sa_001_c3"
+      claim: "The fix is targeted to the pagination module; no unrelated files are modified"
+      weight: 0.10
+      automated: true
+      test_command: "git diff --name-only HEAD | grep -v 'pagination' | wc -l | xargs test 0 -eq"
+
+    - id: "sa_001_c4"
+      claim: "The changed code has no new ruff lint violations"
+      weight: 0.10
+      automated: true
+      test_command: "ruff check app/utils/pagination.py --exit-zero --statistics | grep -c 'E\\|W' | xargs test 0 -eq"
+
+  test_suite:
+    command: "pytest tests/test_pagination.py -q --tb=short"
+    pass_threshold: 1.0
+    timeout_seconds: 60
+
+metadata:
+  created_at: "2026-03-08"
+  annotators: ["rachitpareek"]
+  source: "synthetic"
+  programming_language: "python"
+  domain: "backend"
+  tags: ["bug-fix", "pagination", "off-by-one", "unit-test"]
+  contamination_check:
+    checked_at: "2026-03-08"
+    method: "synthetic — no contamination risk"
+    result: "clean"

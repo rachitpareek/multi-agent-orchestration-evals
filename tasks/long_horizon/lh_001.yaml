@@ -1,0 +1,124 @@
+# MAO-Bench Task: lh_001
+# Tier: long_horizon — requires 3+ compaction cycles
+# This task cannot be completed in a single agent context window.
+# It directly tests the Beads-class "50 First Dates" persistence problem.
+
+id: lh_001
+version: "0.1.0"
+tier: long_horizon
+title: "Migrate a Flask REST API from SQLite to PostgreSQL with full test coverage"
+difficulty: hard
+
+prompt: |
+  The repository contains a Flask REST API backed by SQLite. Your task is to
+  migrate it to use PostgreSQL as the primary database.
+
+  The migration must be complete and production-ready:
+
+  1. Replace the SQLite connection and schema with SQLAlchemy + psycopg2
+  2. Write and run Alembic database migrations for all existing tables
+  3. Update all database queries to use SQLAlchemy ORM (no raw SQL)
+  4. Ensure all existing API endpoints pass their integration tests against PostgreSQL
+  5. Add a Docker Compose file that starts the app with a PostgreSQL container
+  6. Update the README with PostgreSQL setup instructions
+  7. Verify no SQLite references remain in the codebase after migration
+
+  This is a large migration. Work incrementally, commit frequently, and use
+  your issue tracker to record completed steps and remaining work between sessions.
+  Track your progress explicitly — do not rely on your context window to remember
+  what has been done.
+
+context:
+  repo: "maobench/flask-sqlite-api"
+  base_commit: "def5678"
+  relevant_files:
+    - "app/db.py"
+    - "app/models.py"
+    - "app/api/*.py"
+    - "tests/test_api.py"
+    - "requirements.txt"
+  background: |
+    The application has approximately 15 API endpoints across 4 domain areas
+    (users, items, orders, reports). The schema has 8 tables with foreign key
+    relationships. The test suite has 85 tests. Estimated token requirement
+    exceeds a single context window — plan accordingly.
+
+agent_config:
+  min_agents: 1
+  max_agents: 1
+  recommended_agents: 1
+  max_sessions: 6  # Expects 3–6 compaction cycles
+
+token_budget:
+  input_budget: 500000   # spread across sessions
+  output_budget: 150000
+  coordination_budget: 5000   # beads issue tracking overhead
+
+environment:
+  docker_image: "ghcr.io/rachitpareek/maobench-sandbox-python:3.12"
+  setup_commands:
+    - "pip install -e .[dev] -q"
+    - "pip install alembic psycopg2-binary sqlalchemy -q"
+  network_policy: isolated
+
+oracle:
+  partial_credit: true
+  claims:
+    - id: "lh_001_c1"
+      claim: "SQLAlchemy models exist for all 8 original tables with correct relationships"
+      weight: 0.15
+      automated: true
+      test_command: "python -c \"from app.models import *; assert len([t for t in Base.metadata.tables]) == 8\""
+
+    - id: "lh_001_c2"
+      claim: "Alembic migration files exist and apply cleanly against a fresh PostgreSQL database"
+      weight: 0.15
+      automated: true
+      test_command: "alembic upgrade head && echo OK"
+
+    - id: "lh_001_c3"
+      claim: "All 85 existing API tests pass against PostgreSQL"
+      weight: 0.30
+      automated: true
+      test_command: "pytest tests/test_api.py -q --tb=short"
+
+    - id: "lh_001_c4"
+      claim: "No SQLite references remain in Python source files"
+      weight: 0.10
+      automated: true
+      test_command: "grep -r 'sqlite' app/ --include='*.py' | wc -l | xargs test 0 -eq"
+
+    - id: "lh_001_c5"
+      claim: "Docker Compose file exists and defines both the app and a PostgreSQL service"
+      weight: 0.10
+      automated: true
+      test_command: "test -f docker-compose.yml && grep -q 'postgres' docker-compose.yml"
+
+    - id: "lh_001_c6"
+      claim: "README contains PostgreSQL setup instructions"
+      weight: 0.10
+      automated: true
+      test_command: "grep -qi 'postgresql\\|postgres' README.md"
+
+    - id: "lh_001_c7"
+      claim: "Agent tracked migration progress using an external issue tracker across sessions"
+      weight: 0.10
+      automated: false
+      # Scored by checking bd list --closed for completed sub-tasks
+
+  test_suite:
+    command: "pytest tests/ -q --tb=short"
+    pass_threshold: 0.95
+    timeout_seconds: 300
+
+metadata:
+  created_at: "2026-03-08"
+  annotators: ["rachitpareek"]
+  source: "synthetic"
+  programming_language: "python"
+  domain: "backend"
+  tags: ["migration", "database", "long-horizon", "multi-session", "persistence-test", "flask", "postgresql"]
+  contamination_check:
+    checked_at: "2026-03-08"
+    method: "synthetic — no contamination risk"
+    result: "clean"

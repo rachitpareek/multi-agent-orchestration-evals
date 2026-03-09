@@ -1,0 +1,309 @@
+# MAO-Bench Task Schema
+# Version: 0.1.0
+# Every task in the benchmark MUST conform to this schema.
+# See docs/TASK_SCHEMA.md for annotation guidelines.
+
+$schema: "https://json-schema.org/draft/2020-12"
+$id: "https://github.com/rachitpareek/multi-agent-orchestration-evals/tasks/schema.yaml"
+title: MAOTask
+description: A single evaluation task in the Multi-Agent Orchestration Benchmark.
+type: object
+required:
+  - id
+  - version
+  - tier
+  - title
+  - prompt
+  - environment
+  - oracle
+  - metadata
+
+properties:
+
+  # ─── Identity ────────────────────────────────────────────────────────────────
+
+  id:
+    type: string
+    description: Unique task identifier. Format: <tier_prefix>_<zero-padded-number>
+    pattern: "^(sa|pm|sm|lh|adv|fed)_\\d{3}$"
+    examples: ["sa_001", "pm_042", "lh_008", "adv_015", "fed_003"]
+
+  version:
+    type: string
+    description: Semantic version of this task file.
+    pattern: "^\\d+\\.\\d+\\.\\d+$"
+    default: "0.1.0"
+
+  tier:
+    type: string
+    enum:
+      - single_agent       # Solvable by one agent in one session
+      - parallel_multi     # Benefits from parallel agents on independent sub-problems
+      - sequential_multi   # Requires agents working in dependency order
+      - long_horizon       # Spans 3+ compaction cycles / sessions
+      - adversarial        # Tests robustness under failure or conflict
+      - federated          # Cross-repo or cross-organization coordination
+    description: Task tier, corresponding to the tasks/ subdirectory.
+
+  title:
+    type: string
+    description: Short human-readable task title (≤80 chars).
+    maxLength: 80
+
+  difficulty:
+    type: string
+    enum: [easy, medium, hard, expert]
+    description: >
+      Difficulty calibrated empirically against baseline systems.
+      easy: >70% of baseline systems solve it.
+      medium: 40–70%.
+      hard: 10–40%.
+      expert: <10%.
+
+  # ─── Task Content ─────────────────────────────────────────────────────────────
+
+  prompt:
+    type: string
+    description: >
+      The task prompt as given to the agent(s). Must NOT name specific tools,
+      MCP servers, or reveal the solution approach. May reference the repository
+      and issue description.
+    minLength: 50
+
+  context:
+    type: object
+    description: Additional context provided alongside the prompt.
+    properties:
+      issue_url:
+        type: string
+        description: Source GitHub issue URL (if task is derived from a real issue).
+      repo:
+        type: string
+        description: Repository identifier (org/repo).
+      base_commit:
+        type: string
+        description: Git commit SHA of the repository snapshot to use.
+      relevant_files:
+        type: array
+        items: { type: string }
+        description: List of files especially relevant to this task (hints, not required).
+      background:
+        type: string
+        description: Background prose the agent may read (injected into context).
+
+  # ─── Agent Configuration ──────────────────────────────────────────────────────
+
+  agent_config:
+    type: object
+    description: Agent count and role guidance for multi-agent tiers.
+    properties:
+      min_agents:
+        type: integer
+        minimum: 1
+        description: Minimum agents needed for a valid run.
+      max_agents:
+        type: integer
+        description: Maximum agents the harness should instantiate.
+      recommended_agents:
+        type: integer
+        description: Recommended agent count (used as default in harness).
+      roles:
+        type: array
+        items:
+          type: object
+          required: [role, count, description]
+          properties:
+            role:
+              type: string
+              description: Role label (e.g., orchestrator, worker, reviewer).
+            count:
+              type: integer
+            description:
+              type: string
+      topology:
+        type: string
+        enum: [star, chain, tree, graph, free]
+        description: Recommended coordination topology. 'free' lets the system choose.
+      max_sessions:
+        type: integer
+        description: Max session count for long-horizon tasks (default 1 for single-agent).
+
+  token_budget:
+    type: object
+    description: Token budget guidance (used for efficiency scoring).
+    properties:
+      input_budget:
+        type: integer
+        description: Expected total input tokens across all agents.
+      output_budget:
+        type: integer
+        description: Expected total output tokens across all agents.
+      coordination_budget:
+        type: integer
+        description: Expected tokens attributable to coordination (not productive work).
+
+  # ─── Environment ──────────────────────────────────────────────────────────────
+
+  environment:
+    type: object
+    required: [docker_image]
+    description: Hermetic execution environment specification.
+    properties:
+      docker_image:
+        type: string
+        description: >
+          Docker image tag for the task sandbox. Must be a published, pinned image.
+          Format: registry/org/image:tag@sha256:...
+      setup_commands:
+        type: array
+        items: { type: string }
+        description: Shell commands to run inside the container before the agent starts.
+      env_vars:
+        type: object
+        additionalProperties: { type: string }
+        description: Environment variables to inject (non-sensitive only).
+      mcp_servers:
+        type: array
+        items:
+          type: object
+          required: [name, image]
+          properties:
+            name: { type: string }
+            image: { type: string }
+            config: { type: object }
+        description: MCP servers to make available to agents during this task.
+      network_policy:
+        type: string
+        enum: [isolated, mcp_only, full]
+        default: isolated
+        description: >
+          Network access policy.
+          isolated: no external network access.
+          mcp_only: agents can only reach configured MCP servers.
+          full: unrestricted (only for federated tasks requiring DoltHub).
+      failure_injections:
+        type: array
+        description: Failure injection specs (for adversarial tier only).
+        items:
+          type: object
+          required: [type, target, trigger]
+          properties:
+            type:
+              type: string
+              enum: [kill_agent, delay_tool, corrupt_tool_output, drop_network]
+            target:
+              type: string
+              description: Which agent role or tool name to target.
+            trigger:
+              type: object
+              description: When to trigger (time_offset_seconds, after_n_tool_calls, etc.).
+            severity:
+              type: string
+              enum: [soft, hard]
+              description: soft = recoverable; hard = unrecoverable.
+
+  # ─── Oracle / Scoring ─────────────────────────────────────────────────────────
+
+  oracle:
+    type: object
+    required: [claims]
+    description: Scoring specification for this task.
+    properties:
+      claims:
+        type: array
+        description: >
+          List of factual claims the correct solution must satisfy.
+          Each claim is independently scored. Total score = claims satisfied / total claims.
+        items:
+          type: object
+          required: [id, claim, weight]
+          properties:
+            id:
+              type: string
+              description: Unique claim identifier within this task.
+            claim:
+              type: string
+              description: Falsifiable factual statement about the correct output.
+            weight:
+              type: number
+              minimum: 0
+              maximum: 1
+              description: Relative weight of this claim in the final score.
+            automated:
+              type: boolean
+              description: Whether this claim can be auto-scored (true) or needs human review.
+            test_command:
+              type: string
+              description: Shell command to run to evaluate this claim (exit 0 = pass).
+
+      test_suite:
+        type: object
+        description: Automated test suite run against the agent's changes.
+        properties:
+          command:
+            type: string
+            description: Command to run the test suite (e.g., `pytest tests/`).
+          pass_threshold:
+            type: number
+            minimum: 0
+            maximum: 1
+            description: Fraction of tests that must pass for this oracle to return true.
+          timeout_seconds:
+            type: integer
+            default: 300
+
+      reference_output:
+        type: string
+        description: >
+          Path to a reference implementation or gold patch (relative to repo root).
+          Used for similarity scoring, not copied to agent context.
+
+      partial_credit:
+        type: boolean
+        default: true
+        description: Whether partial credit is awarded (always true for MAO-Bench).
+
+  # ─── Metadata / Provenance ────────────────────────────────────────────────────
+
+  metadata:
+    type: object
+    required: [created_at, annotators]
+    properties:
+      created_at:
+        type: string
+        format: date
+      updated_at:
+        type: string
+        format: date
+      annotators:
+        type: array
+        items: { type: string }
+        description: GitHub handles or anonymous IDs of task annotators.
+      source:
+        type: string
+        description: Origin of the task (e.g., "swe-bench-verified", "synthetic", "gas-town-wanted-board").
+      source_url:
+        type: string
+        description: Original URL if sourced from an external system.
+      programming_language:
+        type: string
+        description: Primary programming language of the task codebase.
+      domain:
+        type: string
+        enum: [backend, frontend, data, infrastructure, documentation, research, mixed]
+      tags:
+        type: array
+        items: { type: string }
+        description: Free-form tags for filtering and analysis.
+      contamination_check:
+        type: object
+        properties:
+          checked_at:
+            type: string
+            format: date
+          method:
+            type: string
+            description: How contamination was checked (e.g., "web search", "model query").
+          result:
+            type: string
+            enum: [clean, suspected, confirmed_contaminated]
